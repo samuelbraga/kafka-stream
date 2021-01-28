@@ -1,0 +1,1 @@
+docker run -it --rm --network=kafka_default -v $PWD:/home/data/  postgres:11.0 psql -h postgres -U postgres

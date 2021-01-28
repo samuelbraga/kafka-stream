@@ -1,0 +1,84 @@
+version: '3'
+
+services:
+  postgres:
+    image: debezium/postgres:11
+    environment:
+      POSTGRES_PASSWORD: postgres
+    command: postgres -c config_file=/home/config/postgresql.conf
+    ports:
+      - 5432:5432
+    volumes:
+      - $PWD/postgres:/home/config
+
+  zookeeper:
+    image: zookeeper:3.5.7
+    ports:
+      - '2181:2181'
+
+  schema_registry:
+    image: confluentinc/cp-schema-registry
+    links:
+      - kafka
+    ports:
+      - 8081:8081
+    environment: 
+      - SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS=kafka:9092
+      - SCHEMA_REGISTRY_HOST_NAME=localhost
+      - SCHEMA_REGISTRY_LISTENERS=http://0.0.0.0:8081
+
+  kafka:
+    image: wurstmeister/kafka
+    ports:
+      - '9092:9092'
+      - '9093:9093'
+      - '9094:9094'
+    links:
+      - zookeeper
+    environment:
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_CREATE_TOPICS: avro:1:1,avro-config:1:1:compact,avro-offsets:1:1:compact,avro-status:1:1:compact
+      KAFKA_LISTENERS: INSIDE://:9092,PLAINTEXT://:9093,OUTSIDE://:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,INSIDE:PLAINTEXT,OUTSIDE:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INSIDE
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+
+  connect:
+    build: ./kafka-connect
+    links:
+      - kafka
+      - schema_registry
+      - postgres
+    ports:
+      - 8083:8083
+    environment:
+      CONNECT_BOOTSTRAP_SERVERS: kafka:9092
+      CONNECT_REST_PORT: 8083
+      CONNECT_GROUP_ID: "avro"
+      CONNECT_CONFIG_STORAGE_TOPIC: "avro-config"
+      CONNECT_OFFSET_STORAGE_TOPIC: "avro-offsets"
+      CONNECT_STATUS_STORAGE_TOPIC: "avro-status"
+      CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 3
+      CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 3
+      CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 3
+      CONNECT_KEY_CONVERTER: "io.confluent.connect.avro.AvroConverter"
+      CONNECT_VALUE_CONVERTER: "io.confluent.connect.avro.AvroConverter"
+      CONNECT_KEY_CONVERTER_SCHEMA_REGISTRY_URL: "http://schema_registry:8081"
+      CONNECT_VALUE_CONVERTER_SCHEMA_REGISTRY_URL: "http://schema_registry:8081"
+      CONNECT_INTERNAL_KEY_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+      CONNECT_INTERNAL_VALUE_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+      CONNECT_REST_ADVERTISED_HOST_NAME: "localhost"
+      CONNECT_LOG4J_ROOT_LOGLEVEL: DEBUG
+
+  ksql-server:
+    image: confluentinc/cp-ksql-server:5.1.2
+    depends_on:
+      - kafka
+      - schema_registry
+    ports:
+      - 8088:8088
+    environment:
+      KSQL_BOOTSTRAP_SERVERS: kafka:9092
+      KSQL_LISTENERS: http://0.0.0.0:8088
+      KSQL_KSQL_SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      KSQL_KSQL_SERVICE_ID: ksql-server
